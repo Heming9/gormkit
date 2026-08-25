@@ -43,6 +43,59 @@ func TestRepositoryCRUDAndErrors(t *testing.T) {
 	}
 }
 
+func TestRepositoryCreateIsInsertOnly(t *testing.T) {
+	database := openTestDatabase(t)
+	migrateTestUsers(t, database)
+	repo := gormkit.NewRepository[*testUser](database.Client(context.Background()))
+
+	created := &testUser{Name: "created"}
+	if err := repo.Create(created); err != nil {
+		t.Fatalf("create: %v", err)
+	}
+	if created.ID == 0 {
+		t.Fatal("Create did not populate the generated primary key")
+	}
+
+	duplicate := &testUser{ID: created.ID, Name: "duplicate"}
+	err := repo.Create(duplicate)
+	if err == nil {
+		t.Fatal("Create must return a primary-key conflict instead of updating")
+	}
+	found, findErr := repo.FindByID(created.ID)
+	if findErr != nil {
+		t.Fatalf("find original row: %v", findErr)
+	}
+	if found.Name != created.Name {
+		t.Fatalf("conflicting Create changed the row: got %q want %q", found.Name, created.Name)
+	}
+}
+
+func TestRepositoryCreateAllUsesOneBatchAndPopulatesIDs(t *testing.T) {
+	database := openTestDatabase(t)
+	migrateTestUsers(t, database)
+	repo := gormkit.NewRepository[*testUser](database.Client(context.Background()))
+
+	first := &testUser{Name: "first"}
+	second := &testUser{Name: "second"}
+	if err := repo.CreateAll(first, second); err != nil {
+		t.Fatalf("create all: %v", err)
+	}
+	if first.ID == 0 || second.ID == 0 {
+		t.Fatalf("CreateAll did not populate generated primary keys: first=%d second=%d", first.ID, second.ID)
+	}
+	count, err := repo.CountBy()
+	if err != nil || count != 2 {
+		t.Fatalf("count after CreateAll: count=%d err=%v", count, err)
+	}
+}
+
+func TestRepositoryCreateAllEmptyIsNoOp(t *testing.T) {
+	repo := gormkit.NewRepository[*testUser](nil)
+	if err := repo.CreateAll(); err != nil {
+		t.Fatalf("empty CreateAll: %v", err)
+	}
+}
+
 func TestRepositorySaveWithUniqueCondition(t *testing.T) {
 	database := openTestDatabase(t)
 	migrateTestUsers(t, database)

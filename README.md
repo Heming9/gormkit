@@ -82,6 +82,11 @@ not found errors remain compatible with `errors.Is(err, gorm.ErrRecordNotFound)`
 ```go
 repo := gormkit.NewRepository[*User](database.Client(ctx))
 
+user := &User{Name: "example"}
+if err := repo.Create(user); err != nil {
+    // Create is insert-only; primary/unique conflicts are returned.
+}
+
 user, err := repo.FindByID(id)
 if errors.Is(err, gorm.ErrRecordNotFound) {
     // handle absence

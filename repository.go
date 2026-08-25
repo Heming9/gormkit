@@ -25,6 +25,8 @@ type Repository[T any] interface {
 	FindByIDs(ids ...any) ([]T, error)
 	FindBy(where any, args ...any) ([]T, error)
 	FindAll() ([]T, error)
+	Create(entity T) error
+	CreateAll(entities ...T) error
 	Save(entity T, where ...any) error
 	SaveAll(entities ...T) error
 	UpdateBy(data any, where any, args ...any) error
@@ -174,6 +176,25 @@ func (r *repository[T]) FindBy(where any, args ...any) ([]T, error) {
 
 func (r *repository[T]) FindAll() ([]T, error) {
 	return r.list(nil)
+}
+
+func (r *repository[T]) Create(entity T) error {
+	db, err := r.session()
+	if err != nil {
+		return err
+	}
+	return db.Create(entity).Error
+}
+
+func (r *repository[T]) CreateAll(entities ...T) error {
+	if len(entities) == 0 {
+		return nil
+	}
+	db, err := r.session()
+	if err != nil {
+		return err
+	}
+	return db.Create(entities).Error
 }
 
 func (r *repository[T]) Save(entity T, where ...any) error {

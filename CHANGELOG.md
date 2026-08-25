@@ -2,6 +2,12 @@
 
 All notable changes are documented in this file.
 
+## [0.2.0] - 2026-08-25
+
+### Added
+
+- Insert-only generic repository operations `Create` and `CreateAll`, including batch inserts and generated primary-key population.
+
 ## [0.1.1] - 2026-08-25
 
 ### Fixed
