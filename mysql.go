@@ -46,17 +46,7 @@ func OpenMySQL(config MySQLConfig) (*Database, error) {
 	if location == nil {
 		location = time.Local
 	}
-	driverConfig := &mysqldriver.Config{
-		User:      config.Username,
-		Passwd:    config.Password,
-		Net:       "tcp",
-		Addr:      config.Address,
-		DBName:    config.Database,
-		ParseTime: true,
-		Loc:       location,
-		Params:    map[string]string{"charset": charset},
-	}
-	dsn := driverConfig.FormatDSN()
+	dsn := mysqlDSN(config, charset, location)
 	gormLogger := config.Logger
 	if gormLogger == nil {
 		gormLogger = logger.Discard
@@ -90,6 +80,19 @@ func OpenMySQL(config MySQLConfig) (*Database, error) {
 		pool.SetConnMaxLifetime(config.ConnectionMaxLifetime)
 	}
 	return db, nil
+}
+
+func mysqlDSN(config MySQLConfig, charset string, location *time.Location) string {
+	driverConfig := mysqldriver.NewConfig()
+	driverConfig.User = config.Username
+	driverConfig.Passwd = config.Password
+	driverConfig.Net = "tcp"
+	driverConfig.Addr = config.Address
+	driverConfig.DBName = config.Database
+	driverConfig.ParseTime = true
+	driverConfig.Loc = location
+	driverConfig.Params = map[string]string{"charset": charset}
+	return driverConfig.FormatDSN()
 }
 
 // ConnectMySQL opens MySQL and installs it as the process-wide default database.

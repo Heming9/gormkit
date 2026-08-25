@@ -2,6 +2,12 @@
 
 All notable changes are documented in this file.
 
+## [0.1.1] - 2026-08-25
+
+### Fixed
+
+- Preserve the MySQL driver's secure defaults when building a DSN, including support for `mysql_native_password` users.
+
 ## [0.1.0] - 2026-08-25
 
 ### Added
