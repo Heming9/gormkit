@@ -8,6 +8,10 @@ All notable changes are documented in this file.
 
 - Insert-only generic repository operations `Create` and `CreateAll`, including batch inserts and generated primary-key population.
 
+### Changed
+
+- Upgrade GORM from 1.31.1 to 1.31.2.
+
 ## [0.1.1] - 2026-08-25
 
 ### Fixed
