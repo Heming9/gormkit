@@ -88,3 +88,106 @@ func TestTenantQueryRequiresContext(t *testing.T) {
 		t.Fatalf("query without tenant: %v", err)
 	}
 }
+
+func TestTenantCreateAlwaysPersistsContextTenant(t *testing.T) {
+	database := openTestDatabase(t)
+	base := database.Client(context.Background())
+	if err := base.AutoMigrate(&tenantRecord{}); err != nil {
+		t.Fatal(err)
+	}
+
+	ctx := gormkit.WithTenantID(context.Background(), 7)
+	client := database.Client(ctx)
+	selected := &tenantRecord{TenantID: 91, Name: "selected"}
+	omitted := &tenantRecord{TenantID: 92, Name: "omitted"}
+	omitAll := &tenantRecord{TenantID: 93, Name: "not-persisted"}
+
+	if err := client.Select("Name").Create(selected).Error; err != nil {
+		t.Fatalf("create with Select: %v", err)
+	}
+	if err := client.Omit("TenantID").Create(omitted).Error; err != nil {
+		t.Fatalf("create with Omit: %v", err)
+	}
+	if err := client.Omit("*").Create(omitAll).Error; err != nil {
+		t.Fatalf("create with Omit all: %v", err)
+	}
+
+	var rows []tenantRecord
+	if err := base.Unscoped().Order("id").Find(&rows).Error; err != nil {
+		t.Fatal(err)
+	}
+	if len(rows) != 3 {
+		t.Fatalf("row count = %d, want 3", len(rows))
+	}
+	for _, row := range rows {
+		if row.TenantID != 7 {
+			t.Fatalf("persisted tenant = %d for row %+v, want 7", row.TenantID, row)
+		}
+	}
+	if rows[0].Name != "selected" || rows[1].Name != "omitted" || rows[2].Name != "" {
+		t.Fatalf("create selections were not preserved: %+v", rows)
+	}
+	if selected.TenantID != 7 || omitted.TenantID != 7 || omitAll.TenantID != 7 {
+		t.Fatalf("models were not synchronized: selected=%d omitted=%d omitAll=%d",
+			selected.TenantID, omitted.TenantID, omitAll.TenantID)
+	}
+}
+
+func TestTenantBatchCreateOverwritesEveryTenant(t *testing.T) {
+	database := openTestDatabase(t)
+	base := database.Client(context.Background())
+	if err := base.AutoMigrate(&tenantRecord{}); err != nil {
+		t.Fatal(err)
+	}
+
+	ctx := gormkit.WithTenantID(context.Background(), 12)
+	rows := []tenantRecord{
+		{TenantID: 1, Name: "first"},
+		{TenantID: 2, Name: "second"},
+	}
+	if err := database.Client(ctx).Select("Name").Create(&rows).Error; err != nil {
+		t.Fatal(err)
+	}
+	for i := range rows {
+		if rows[i].TenantID != 12 {
+			t.Fatalf("row %d tenant = %d, want 12", i, rows[i].TenantID)
+		}
+	}
+
+	var count int64
+	if err := database.Client(ctx).Model(&tenantRecord{}).Count(&count).Error; err != nil {
+		t.Fatal(err)
+	}
+	if count != 2 {
+		t.Fatalf("tenant row count = %d, want 2", count)
+	}
+}
+
+func TestTenantUpdateCannotSelectTenantColumn(t *testing.T) {
+	database := openTestDatabase(t)
+	base := database.Client(context.Background())
+	if err := base.AutoMigrate(&tenantRecord{}); err != nil {
+		t.Fatal(err)
+	}
+
+	ctx := gormkit.WithTenantID(context.Background(), 21)
+	record := &tenantRecord{Name: "before"}
+	client := database.Client(ctx)
+	if err := client.Create(record).Error; err != nil {
+		t.Fatal(err)
+	}
+	if err := client.Model(record).Select("Name", "TenantID").Updates(&tenantRecord{
+		TenantID: 22,
+		Name:     "after",
+	}).Error; err != nil {
+		t.Fatal(err)
+	}
+
+	var stored tenantRecord
+	if err := base.Unscoped().First(&stored, record.ID).Error; err != nil {
+		t.Fatal(err)
+	}
+	if stored.TenantID != 21 || stored.Name != "after" {
+		t.Fatalf("tenant update was not isolated: %+v", stored)
+	}
+}

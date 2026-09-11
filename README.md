@@ -117,7 +117,8 @@ err := database.Client(ctx).Create(&Project{Name: "example"}).Error
 ```
 
 Create, query, update, and delete operations require a tenant context for these
-models. The tenant field is overwritten on create and omitted from updates.
+models. The tenant field is overwritten and always included on create—even when
+the caller uses `Select` or `Omit`—and is omitted from updates.
 
 > `Unscoped()` deliberately bypasses tenant filtering as well as GORM soft-delete
 > filtering. Treat it as a privileged operation and do not expose it to

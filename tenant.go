@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"strconv"
+	"strings"
 
 	"gorm.io/gorm"
 	"gorm.io/gorm/clause"
@@ -143,5 +144,59 @@ func (tenant tenantCreateClause) ModifyStatement(statement *gorm.Statement) {
 		statement.AddError(ErrTenantRequired)
 		return
 	}
+	// Tenant isolation must not depend on the caller remembering to include the
+	// tenant column in Select, or avoiding it in Omit. In particular,
+	// Select("Name").Create(...) used to leave tenant_id at its database zero
+	// value even though SetColumn updated the in-memory model.
+	includeTenantOnCreate(statement, tenant.field)
 	statement.SetColumn(tenant.field.DBName, id, true)
+}
+
+// includeTenantOnCreate makes the tenant field mandatory for INSERTs while
+// preserving all other Select/Omit choices made by the caller.
+func includeTenantOnCreate(statement *gorm.Statement, field *schema.Field) {
+	if statement == nil || field == nil {
+		return
+	}
+
+	isTenant := func(name string) bool {
+		name = strings.Trim(name, "`\"[]")
+		if dot := strings.LastIndexByte(name, '.'); dot >= 0 {
+			name = strings.Trim(name[dot+1:], "`\"[]")
+		}
+		if name == field.Name || name == field.DBName {
+			return true
+		}
+		return statement.Schema != nil && statement.Schema.LookUpField(name) == field
+	}
+
+	selectsTenant := false
+	for _, name := range statement.Selects {
+		if name == "*" || isTenant(name) {
+			selectsTenant = true
+			break
+		}
+	}
+	if len(statement.Selects) > 0 && !selectsTenant {
+		statement.Selects = append(statement.Selects, field.DBName)
+	}
+
+	omits := statement.Omits[:0]
+	for _, name := range statement.Omits {
+		switch {
+		case isTenant(name):
+			// The tenant column is mandatory on create.
+		case name == "*" && statement.Schema != nil:
+			// Expand Omit("*") so every regular field except the tenant remains
+			// omitted. Simply dropping it would unexpectedly insert all fields.
+			for _, dbName := range statement.Schema.DBNames {
+				if !isTenant(dbName) {
+					omits = append(omits, dbName)
+				}
+			}
+		default:
+			omits = append(omits, name)
+		}
+	}
+	statement.Omits = omits
 }

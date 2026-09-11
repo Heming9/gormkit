@@ -2,6 +2,13 @@
 
 All notable changes are documented in this file.
 
+## [Unreleased]
+
+### Fixed
+
+- Always persist the context tenant during selected, omitted, and batch creates.
+- Keep the tenant column immutable even when it is explicitly selected for an update.
+
 ## [0.2.0] - 2026-08-25
 
 ### Added
