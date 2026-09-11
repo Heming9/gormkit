@@ -15,8 +15,8 @@ func TestRepositoryCRUDAndErrors(t *testing.T) {
 	repo := gormkit.NewRepository[*testUser](database.Client(context.Background()))
 
 	alice := &testUser{Name: "Alice", Email: "alice@example.test", Age: 30}
-	if err := repo.Save(alice); err != nil {
-		t.Fatalf("save: %v", err)
+	if err := repo.Create(alice); err != nil {
+		t.Fatalf("create: %v", err)
 	}
 	found, err := repo.FindByID(alice.ID)
 	if err != nil || found.Name != alice.Name {
@@ -27,7 +27,7 @@ func TestRepositoryCRUDAndErrors(t *testing.T) {
 	}
 
 	alice.Age = 31
-	if err := repo.Save(alice); err != nil {
+	if err := repo.Update(alice); err != nil {
 		t.Fatalf("update: %v", err)
 	}
 	exists, err := repo.Exists("email = ?", alice.Email)
@@ -96,29 +96,80 @@ func TestRepositoryCreateAllEmptyIsNoOp(t *testing.T) {
 	}
 }
 
-func TestRepositorySaveWithUniqueCondition(t *testing.T) {
+func TestRepositoryUpdateIncludesZeroValues(t *testing.T) {
 	database := openTestDatabase(t)
 	migrateTestUsers(t, database)
 	repo := gormkit.NewRepository[*testUser](database.Client(context.Background()))
 
-	first := &testUser{Name: "first", Email: "same@example.test"}
-	if err := repo.Save(first); err != nil {
+	user := &testUser{Name: "first", Email: "first@example.test", Age: 30, Admin: true}
+	if err := repo.Create(user); err != nil {
 		t.Fatal(err)
 	}
-	update := &testUser{Name: "updated"}
-	if err := repo.Save(update, "email = ?", first.Email); err != nil {
-		t.Fatalf("conditional update: %v", err)
+	user.Name = ""
+	user.Age = 0
+	user.Admin = false
+	if err := repo.Update(user); err != nil {
+		t.Fatalf("update: %v", err)
 	}
-	if update.ID != first.ID {
-		t.Fatalf("primary key was not copied: got %d want %d", update.ID, first.ID)
+	got, err := repo.FindByID(user.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got.Name != "" || got.Age != 0 || got.Admin || got.Email != user.Email {
+		t.Fatalf("Update did not include zero values: %+v", got)
+	}
+}
+
+func TestRepositoryUpdateValidation(t *testing.T) {
+	database := openTestDatabase(t)
+	migrateTestUsers(t, database)
+	repo := gormkit.NewRepository[*testUser](database.Client(context.Background()))
+
+	if err := repo.Update(nil); !errors.Is(err, gormkit.ErrNilEntity) {
+		t.Fatalf("Update(nil): %v", err)
+	}
+	if err := repo.Update(&testUser{Name: "missing key"}); !errors.Is(err, gormkit.ErrPrimaryKeyRequired) {
+		t.Fatalf("Update with zero primary key: %v", err)
+	}
+	if err := repo.Update(&testUser{ID: 99999, Name: "missing"}); !errors.Is(err, gorm.ErrRecordNotFound) {
+		t.Fatalf("Update missing row: %v", err)
+	}
+}
+
+func TestRepositoryUpdateAllIsAtomic(t *testing.T) {
+	database := openTestDatabase(t)
+	migrateTestUsers(t, database)
+	repo := gormkit.NewRepository[*testUser](database.Client(context.Background()))
+
+	first := &testUser{Name: "first"}
+	second := &testUser{Name: "second"}
+	if err := repo.CreateAll(first, second); err != nil {
+		t.Fatal(err)
+	}
+	first.Name = "updated first"
+	second.Name = "updated second"
+	if err := repo.UpdateAll(first, second); err != nil {
+		t.Fatalf("UpdateAll: %v", err)
 	}
 
-	if err := repo.Save(&testUser{Name: "second", Email: first.Email}); err != nil {
+	first.Name = "must roll back"
+	err := repo.UpdateAll(first, &testUser{ID: 99999, Name: "missing"})
+	if !errors.Is(err, gorm.ErrRecordNotFound) {
+		t.Fatalf("UpdateAll missing row: %v", err)
+	}
+	stored, err := repo.FindByID(first.ID)
+	if err != nil {
 		t.Fatal(err)
 	}
-	err := repo.Save(&testUser{Name: "ambiguous"}, "email = ?", first.Email)
-	if !errors.Is(err, gormkit.ErrMultipleRows) {
-		t.Fatalf("expected ErrMultipleRows, got %v", err)
+	if stored.Name != "updated first" {
+		t.Fatalf("UpdateAll did not roll back: %+v", stored)
+	}
+}
+
+func TestRepositoryUpdateAllEmptyIsNoOp(t *testing.T) {
+	repo := gormkit.NewRepository[*testUser](nil)
+	if err := repo.UpdateAll(); err != nil {
+		t.Fatalf("empty UpdateAll: %v", err)
 	}
 }
 
@@ -126,7 +177,7 @@ func TestRepositoryPagingAndScopeIsolation(t *testing.T) {
 	database := openTestDatabase(t)
 	migrateTestUsers(t, database)
 	repo := gormkit.NewRepository[*testUser](database.Client(context.Background()))
-	if err := repo.SaveAll(
+	if err := repo.CreateAll(
 		&testUser{Name: "Charlie", Age: 40},
 		&testUser{Name: "Alice", Age: 20},
 		&testUser{Name: "Bob", Age: 30},
@@ -158,7 +209,7 @@ func TestForceUpdatesZeroValues(t *testing.T) {
 	migrateTestUsers(t, database)
 	repo := gormkit.NewRepository[*testUser](database.Client(context.Background()))
 	user := &testUser{Name: "Alice", Age: 30, Admin: true}
-	if err := repo.Save(user); err != nil {
+	if err := repo.Create(user); err != nil {
 		t.Fatal(err)
 	}
 	forced := repo.WithScope(gormkit.Force("Name", "Admin"))

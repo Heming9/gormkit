@@ -87,6 +87,11 @@ if err := repo.Create(user); err != nil {
     // Create is insert-only; primary/unique conflicts are returned.
 }
 
+user.Name = "updated"
+if err := repo.Update(user); err != nil {
+    // Update requires a non-zero primary key and never inserts a missing row.
+}
+
 user, err := repo.FindByID(id)
 if errors.Is(err, gorm.ErrRecordNotFound) {
     // handle absence
@@ -98,8 +103,9 @@ users, err := repo.
 ```
 
 `RepoOf[T](ctx)` creates a repository from the process-wide default database.
-Conditional `Save` calls should target columns protected by a database unique
-constraint when concurrent writers are possible.
+`CreateAll` performs a batch insert. `UpdateAll` updates entities by primary key
+in one transaction and rolls back the batch when any record is missing. Use
+`UpdateBy` when multiple records receive the same changes.
 
 ## Tenant isolation
 
@@ -118,7 +124,11 @@ err := database.Client(ctx).Create(&Project{Name: "example"}).Error
 
 Create, query, update, and delete operations require a tenant context for these
 models. The tenant field is overwritten and always included on create—even when
-the caller uses `Select` or `Omit`—and is omitted from updates.
+the caller uses `Select` or `Omit`—and is omitted from updates. Conflict-updating
+inserts, including GORM's `Save` fallback and `OnConflict{UpdateAll: true}`, are
+rejected for tenant models because a conflict on a global unique key could
+otherwise update another tenant's row. Use the repository's explicit `Create`
+and `Update` operations instead.
 
 > `Unscoped()` deliberately bypasses tenant filtering as well as GORM soft-delete
 > filtering. Treat it as a privileged operation and do not expose it to

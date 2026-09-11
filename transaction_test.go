@@ -15,13 +15,13 @@ func TestTransactionCommitAndRollback(t *testing.T) {
 	migrateTestUsers(t, database)
 
 	err := database.Transaction(context.Background(), func(ctx context.Context) error {
-		return gormkit.NewRepository[*testUser](database.Client(ctx)).Save(&testUser{Name: "committed"})
+		return gormkit.NewRepository[*testUser](database.Client(ctx)).Create(&testUser{Name: "committed"})
 	})
 	if err != nil {
 		t.Fatalf("commit: %v", err)
 	}
 	err = database.Transaction(context.Background(), func(ctx context.Context) error {
-		if err := gormkit.NewRepository[*testUser](database.Client(ctx)).Save(&testUser{Name: "rolled back"}); err != nil {
+		if err := gormkit.NewRepository[*testUser](database.Client(ctx)).Create(&testUser{Name: "rolled back"}); err != nil {
 			return err
 		}
 		return errRollback

@@ -3,7 +3,6 @@ package gormkit
 import (
 	"context"
 	"errors"
-	"fmt"
 	"reflect"
 
 	"gorm.io/gorm"
@@ -11,9 +10,10 @@ import (
 )
 
 var (
-	ErrInvalidModel  = errors.New("gormkit: repository model must be a concrete type")
-	ErrInvalidPaging = errors.New("gormkit: paging offset and limit must not be negative")
-	ErrMultipleRows  = errors.New("gormkit: more than one row matches the save condition")
+	ErrInvalidModel       = errors.New("gormkit: repository model must be a concrete type")
+	ErrInvalidPaging      = errors.New("gormkit: paging offset and limit must not be negative")
+	ErrNilEntity          = errors.New("gormkit: entity must not be nil")
+	ErrPrimaryKeyRequired = errors.New("gormkit: a non-zero primary key is required for update")
 )
 
 // Repository provides common CRUD operations for pointer-to-struct model T.
@@ -27,8 +27,8 @@ type Repository[T any] interface {
 	FindAll() ([]T, error)
 	Create(entity T) error
 	CreateAll(entities ...T) error
-	Save(entity T, where ...any) error
-	SaveAll(entities ...T) error
+	Update(entity T) error
+	UpdateAll(entities ...T) error
 	UpdateBy(data any, where any, args ...any) error
 	DeleteBy(where any, args ...any) error
 	CountBy(where ...any) (int64, error)
@@ -197,56 +197,78 @@ func (r *repository[T]) CreateAll(entities ...T) error {
 	return db.Create(entities).Error
 }
 
-func (r *repository[T]) Save(entity T, where ...any) error {
+// Update replaces the persisted fields of entity, identified by its primary
+// key. It never inserts a missing record. Zero-valued fields are included.
+func (r *repository[T]) Update(entity T) error {
 	db, err := r.session()
 	if err != nil {
 		return err
 	}
-	if len(where) == 0 {
-		return db.Save(entity).Error
-	}
-	return db.Transaction(func(tx *gorm.DB) error {
-		matches := make([]T, 0, 2)
-		query := tx.Where(where[0], where[1:]...).Limit(2)
-		if err := query.Find(&matches).Error; err != nil {
-			return err
-		}
-		switch len(matches) {
-		case 0:
-			return tx.Create(entity).Error
-		case 1:
-			statement := tx.Statement
-			if err := statement.Parse(matches[0]); err != nil {
-				return err
-			}
-			primary := statement.Schema.PrioritizedPrimaryField
-			if primary == nil {
-				return errors.New("gormkit: model has no prioritized primary key")
-			}
-			primaryValue, _ := primary.ValueOf(statement.Context, reflect.ValueOf(matches[0]))
-			if err := primary.Set(statement.Context, reflect.ValueOf(entity), primaryValue); err != nil {
-				return fmt.Errorf("gormkit: set primary key: %w", err)
-			}
-			return tx.Model(matches[0]).Updates(entity).Error
-		default:
-			return ErrMultipleRows
-		}
-	})
+	return updateEntity(db, entity)
 }
 
-func (r *repository[T]) SaveAll(entities ...T) error {
+// UpdateAll updates every entity in one transaction. Every entity must have a
+// non-zero primary key, and the transaction is rolled back when one is absent.
+func (r *repository[T]) UpdateAll(entities ...T) error {
+	if len(entities) == 0 {
+		return nil
+	}
 	db, err := r.session()
 	if err != nil {
 		return err
 	}
 	return db.Transaction(func(tx *gorm.DB) error {
 		for _, entity := range entities {
-			if err := tx.Save(entity).Error; err != nil {
+			if err := updateEntity(tx, entity); err != nil {
 				return err
 			}
 		}
 		return nil
 	})
+}
+
+func updateEntity[T any](db Client, entity T) error {
+	value := reflect.ValueOf(entity)
+	if !value.IsValid() || (value.Kind() == reflect.Pointer && value.IsNil()) {
+		return ErrNilEntity
+	}
+
+	statement := &gorm.Statement{DB: db, Context: db.Statement.Context}
+	if err := statement.Parse(entity); err != nil {
+		return err
+	}
+	if statement.Schema == nil || len(statement.Schema.PrimaryFields) == 0 {
+		return ErrPrimaryKeyRequired
+	}
+
+	primaryValues := make(map[string]any, len(statement.Schema.PrimaryFields))
+	for _, field := range statement.Schema.PrimaryFields {
+		fieldValue, zero := field.ValueOf(statement.Context, value)
+		if zero {
+			return ErrPrimaryKeyRequired
+		}
+		primaryValues[field.DBName] = fieldValue
+	}
+
+	result := db.Model(entity).Select("*").Updates(entity)
+	if result.Error != nil {
+		return result.Error
+	}
+	if result.RowsAffected > 0 {
+		return nil
+	}
+
+	// MySQL reports zero affected rows when every stored value already equals
+	// the update. Distinguish that idempotent success from a missing record
+	// without falling back to an unsafe upsert.
+	var count int64
+	if err := db.Model(newModel[T]()).Where(primaryValues).Limit(1).Count(&count).Error; err != nil {
+		return err
+	}
+	if count == 0 {
+		return gorm.ErrRecordNotFound
+	}
+	return nil
 }
 
 func (r *repository[T]) UpdateBy(data any, where any, args ...any) error {

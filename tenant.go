@@ -11,7 +11,10 @@ import (
 	"gorm.io/gorm/schema"
 )
 
-var ErrTenantRequired = errors.New("gormkit: tenant context is required")
+var (
+	ErrTenantRequired     = errors.New("gormkit: tenant context is required")
+	ErrUnsafeTenantUpsert = errors.New("gormkit: updating conflicts is unsafe for tenant models")
+)
 
 type tenantKey struct{}
 
@@ -144,12 +147,29 @@ func (tenant tenantCreateClause) ModifyStatement(statement *gorm.Statement) {
 		statement.AddError(ErrTenantRequired)
 		return
 	}
+	if current, exists := statement.Clauses["ON CONFLICT"]; exists {
+		if tenantConflictUpdates(current.Expression) {
+			statement.AddError(ErrUnsafeTenantUpsert)
+			return
+		}
+	}
 	// Tenant isolation must not depend on the caller remembering to include the
 	// tenant column in Select, or avoiding it in Omit. In particular,
 	// Select("Name").Create(...) used to leave tenant_id at its database zero
 	// value even though SetColumn updated the in-memory model.
 	includeTenantOnCreate(statement, tenant.field)
 	statement.SetColumn(tenant.field.DBName, id, true)
+}
+
+func tenantConflictUpdates(expression clause.Expression) bool {
+	switch conflict := expression.(type) {
+	case clause.OnConflict:
+		return conflict.UpdateAll || len(conflict.DoUpdates) > 0
+	case *clause.OnConflict:
+		return conflict != nil && (conflict.UpdateAll || len(conflict.DoUpdates) > 0)
+	default:
+		return false
+	}
 }
 
 // includeTenantOnCreate makes the tenant field mandatory for INSERTs while

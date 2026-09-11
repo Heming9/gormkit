@@ -2,6 +2,20 @@
 
 All notable changes are documented in this file.
 
+## [0.3.0] - 2026-09-12
+
+### Added
+
+- Primary-key-based `Update` and transactional `UpdateAll` repository operations. Updates include zero-valued fields, require an existing record, and never fall back to an insert.
+
+### Changed
+
+- Remove the ambiguous repository `Save` and `SaveAll` operations. Callers now choose explicitly between `Create`/`CreateAll` and `Update`/`UpdateAll`.
+
+### Fixed
+
+- Reject conflict-updating inserts for tenant models, preventing GORM's `Save` fallback or `OnConflict{UpdateAll: true}` from overwriting a row owned by another tenant.
+
 ## [0.2.1] - 2026-09-12
 
 ### Fixed

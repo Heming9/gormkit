@@ -6,6 +6,8 @@ import (
 	"testing"
 
 	"github.com/Heming9/gormkit"
+	"gorm.io/gorm"
+	"gorm.io/gorm/clause"
 )
 
 type tenantRecord struct {
@@ -189,5 +191,76 @@ func TestTenantUpdateCannotSelectTenantColumn(t *testing.T) {
 	}
 	if stored.TenantID != 21 || stored.Name != "after" {
 		t.Fatalf("tenant update was not isolated: %+v", stored)
+	}
+}
+
+func TestTenantRepositoryUpdateRejectsAnotherTenantsPrimaryKey(t *testing.T) {
+	database := openTestDatabase(t)
+	base := database.Client(context.Background())
+	if err := base.AutoMigrate(&tenantRecord{}); err != nil {
+		t.Fatal(err)
+	}
+
+	tenantOne := gormkit.WithTenantID(context.Background(), 1)
+	tenantTwo := gormkit.WithTenantID(context.Background(), 2)
+	victim := &tenantRecord{Name: "victim"}
+	if err := database.Client(tenantOne).Create(victim).Error; err != nil {
+		t.Fatal(err)
+	}
+
+	repo := gormkit.NewRepository[*tenantRecord](database.Client(tenantTwo))
+	err := repo.Update(&tenantRecord{ID: victim.ID, Name: "overwritten"})
+	if !errors.Is(err, gorm.ErrRecordNotFound) {
+		t.Fatalf("cross-tenant Update: %v", err)
+	}
+
+	var stored tenantRecord
+	if err := base.Unscoped().First(&stored, victim.ID).Error; err != nil {
+		t.Fatal(err)
+	}
+	if stored.TenantID != 1 || stored.Name != "victim" {
+		t.Fatalf("cross-tenant Update changed row: %+v", stored)
+	}
+}
+
+func TestTenantRejectsConflictUpdatingUpsert(t *testing.T) {
+	database := openTestDatabase(t)
+	base := database.Client(context.Background())
+	if err := base.AutoMigrate(&tenantRecord{}); err != nil {
+		t.Fatal(err)
+	}
+
+	tenantOne := gormkit.WithTenantID(context.Background(), 1)
+	tenantTwo := gormkit.WithTenantID(context.Background(), 2)
+	victim := &tenantRecord{Name: "victim"}
+	if err := database.Client(tenantOne).Create(victim).Error; err != nil {
+		t.Fatal(err)
+	}
+
+	err := database.Client(tenantTwo).Save(&tenantRecord{
+		ID:   victim.ID,
+		Name: "overwritten",
+	}).Error
+	if !errors.Is(err, gormkit.ErrUnsafeTenantUpsert) {
+		t.Fatalf("cross-tenant GORM Save: %v", err)
+	}
+	err = database.Client(tenantTwo).Clauses(clause.OnConflict{
+		DoUpdates: clause.AssignmentColumns([]string{"name"}),
+	}).Create(&tenantRecord{ID: victim.ID, Name: "also overwritten"}).Error
+	if !errors.Is(err, gormkit.ErrUnsafeTenantUpsert) {
+		t.Fatalf("cross-tenant conflict update: %v", err)
+	}
+	if err := database.Client(tenantTwo).Clauses(clause.OnConflict{
+		DoNothing: true,
+	}).Create(&tenantRecord{ID: victim.ID, Name: "ignored"}).Error; err != nil {
+		t.Fatalf("conflict do nothing: %v", err)
+	}
+
+	var stored tenantRecord
+	if err := base.Unscoped().First(&stored, victim.ID).Error; err != nil {
+		t.Fatal(err)
+	}
+	if stored.TenantID != 1 || stored.Name != "victim" {
+		t.Fatalf("unsafe upsert changed row: %+v", stored)
 	}
 }

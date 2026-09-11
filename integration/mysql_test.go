@@ -55,12 +55,19 @@ func TestMySQLRepositoryAndTransaction(t *testing.T) {
 		t.Fatal(err)
 	}
 
+	committed := &user{Name: "committed"}
 	err := database.Transaction(context.Background(), func(ctx context.Context) error {
 		repo := gormkit.NewRepository[*user](database.Client(ctx))
-		return repo.Save(&user{Name: "committed"})
+		return repo.Create(committed)
 	})
 	if err != nil {
 		t.Fatal(err)
+	}
+	repo := gormkit.NewRepository[*user](client)
+	// MySQL commonly reports zero affected rows for an idempotent update. The
+	// repository verifies existence and still treats it as success.
+	if err := repo.Update(committed); err != nil {
+		t.Fatalf("idempotent update: %v", err)
 	}
 	err = database.Transaction(context.Background(), func(ctx context.Context) error {
 		if err := database.Client(ctx).Create(&user{Name: "rolled-back"}).Error; err != nil {
