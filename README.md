@@ -58,8 +58,7 @@ db, err := gormkit.SQLClient(ctx)
 ```
 
 `MustSQLClient` is available at application boundaries where initialization is
-already guaranteed. The deprecated `SqlClient` spelling remains temporarily for
-source compatibility.
+already guaranteed.
 
 ## Transactions
 

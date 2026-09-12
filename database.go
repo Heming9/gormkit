@@ -140,13 +140,6 @@ func MustSQLClient(ctx context.Context) Client {
 	return db
 }
 
-// SqlClient is kept for source compatibility. New code should use SQLClient or
-// MustSQLClient so failure behavior is explicit.
-// Deprecated: use SQLClient or MustSQLClient.
-func SqlClient(ctx context.Context) Client {
-	return MustSQLClient(ctx)
-}
-
 func closeGORM(db *gorm.DB) {
 	if pool, err := db.DB(); err == nil {
 		_ = pool.Close()
