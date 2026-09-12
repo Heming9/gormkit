@@ -70,7 +70,8 @@ func TestTenantIsolationAcrossCRUD(t *testing.T) {
 	if err := database.Client(tenantOne).Where("id = ?", one.ID).Delete(&tenantRecord{}).Error; err != nil {
 		t.Fatal(err)
 	}
-	if err := base.Unscoped().Model(&tenantRecord{}).Count(&count).Error; err != nil {
+	if err := database.Client(gormkit.WithDisableTenant(context.Background())).
+		Unscoped().Model(&tenantRecord{}).Count(&count).Error; err != nil {
 		t.Fatal(err)
 	}
 	if count != 1 {
@@ -115,7 +116,8 @@ func TestTenantCreateAlwaysPersistsContextTenant(t *testing.T) {
 	}
 
 	var rows []tenantRecord
-	if err := base.Unscoped().Order("id").Find(&rows).Error; err != nil {
+	if err := database.Client(gormkit.WithDisableTenant(context.Background())).
+		Unscoped().Order("id").Find(&rows).Error; err != nil {
 		t.Fatal(err)
 	}
 	if len(rows) != 3 {
@@ -186,7 +188,8 @@ func TestTenantUpdateCannotSelectTenantColumn(t *testing.T) {
 	}
 
 	var stored tenantRecord
-	if err := base.Unscoped().First(&stored, record.ID).Error; err != nil {
+	if err := database.Client(gormkit.WithDisableTenant(context.Background())).
+		Unscoped().First(&stored, record.ID).Error; err != nil {
 		t.Fatal(err)
 	}
 	if stored.TenantID != 21 || stored.Name != "after" {
@@ -215,7 +218,8 @@ func TestTenantRepositoryUpdateRejectsAnotherTenantsPrimaryKey(t *testing.T) {
 	}
 
 	var stored tenantRecord
-	if err := base.Unscoped().First(&stored, victim.ID).Error; err != nil {
+	if err := database.Client(gormkit.WithDisableTenant(context.Background())).
+		Unscoped().First(&stored, victim.ID).Error; err != nil {
 		t.Fatal(err)
 	}
 	if stored.TenantID != 1 || stored.Name != "victim" {
@@ -257,10 +261,134 @@ func TestTenantRejectsConflictUpdatingUpsert(t *testing.T) {
 	}
 
 	var stored tenantRecord
-	if err := base.Unscoped().First(&stored, victim.ID).Error; err != nil {
+	if err := database.Client(gormkit.WithDisableTenant(context.Background())).
+		Unscoped().First(&stored, victim.ID).Error; err != nil {
 		t.Fatal(err)
 	}
 	if stored.TenantID != 1 || stored.Name != "victim" {
 		t.Fatalf("unsafe upsert changed row: %+v", stored)
+	}
+}
+
+type tenantSoftRecord struct {
+	ID        uint             `gorm:"primaryKey"`
+	TenantID  gormkit.TenantID `gorm:"column:tenant_id;index"`
+	Name      string
+	DeletedAt gorm.DeletedAt
+}
+
+func TestTenantUnscopedOnlyDisablesSoftDelete(t *testing.T) {
+	database := openTestDatabase(t)
+	base := database.Client(gormkit.WithDisableTenant(context.Background()))
+	if err := base.AutoMigrate(&tenantSoftRecord{}); err != nil {
+		t.Fatal(err)
+	}
+
+	tenantOne := gormkit.WithTenantID(context.Background(), 1)
+	tenantTwo := gormkit.WithTenantID(context.Background(), 2)
+	one := &tenantSoftRecord{Name: "one"}
+	two := &tenantSoftRecord{Name: "two"}
+	if err := database.Client(tenantOne).Create(one).Error; err != nil {
+		t.Fatal(err)
+	}
+	if err := database.Client(tenantTwo).Create(two).Error; err != nil {
+		t.Fatal(err)
+	}
+	if err := database.Client(tenantOne).Delete(one).Error; err != nil {
+		t.Fatal(err)
+	}
+
+	var rows []tenantSoftRecord
+	if err := database.Client(tenantOne).Unscoped().Find(&rows).Error; err != nil {
+		t.Fatal(err)
+	}
+	if len(rows) != 1 || rows[0].ID != one.ID {
+		t.Fatalf("Unscoped crossed tenant boundary: %+v", rows)
+	}
+
+	rows = nil
+	if err := database.Client(gormkit.WithDisableTenant(tenantOne)).Unscoped().Find(&rows).Error; err != nil {
+		t.Fatal(err)
+	}
+	if len(rows) != 2 {
+		t.Fatalf("disabled tenant row count = %d, want 2", len(rows))
+	}
+}
+
+func TestTenantManualAndDisabledModes(t *testing.T) {
+	database := openTestDatabase(t)
+	base := database.Client(gormkit.WithDisableTenant(context.Background()))
+	if err := base.AutoMigrate(&tenantRecord{}); err != nil {
+		t.Fatal(err)
+	}
+
+	tenantOne := gormkit.WithTenantID(context.Background(), 1)
+	tenantTwo := gormkit.WithTenantID(context.Background(), 2)
+	if err := database.Client(tenantOne).Create(&tenantRecord{Name: "one"}).Error; err != nil {
+		t.Fatal(err)
+	}
+	if err := database.Client(tenantTwo).Create(&tenantRecord{Name: "two"}).Error; err != nil {
+		t.Fatal(err)
+	}
+
+	var rows []tenantRecord
+	err := database.Client(tenantOne).
+		Raw("SELECT * FROM tenant_records WHERE tenant_id = ?", 1).
+		Scan(&rows).Error
+	if !errors.Is(err, gormkit.ErrManualTenantRequired) {
+		t.Fatalf("automatic tenant Raw: %v", err)
+	}
+
+	manual := gormkit.WithManualTenant(tenantOne)
+	manualTenantID, ok := gormkit.GetTenantID(manual)
+	if !ok || manualTenantID != 1 {
+		t.Fatalf("manual tenant identity = (%d, %v), want (1, true)", manualTenantID, ok)
+	}
+	rows = nil
+	if err := database.Client(manual).
+		Raw("SELECT * FROM tenant_records WHERE tenant_id = ?", manualTenantID).
+		Scan(&rows).Error; err != nil {
+		t.Fatal(err)
+	}
+	if len(rows) != 1 || rows[0].Name != "one" {
+		t.Fatalf("manual tenant rows: %+v", rows)
+	}
+	if err := database.Client(tenantOne).
+		Exec("UPDATE tenant_records SET name = ? WHERE tenant_id = ?", "blocked", 1).Error; !errors.Is(err, gormkit.ErrManualTenantRequired) {
+		t.Fatalf("automatic tenant Exec: %v", err)
+	}
+	if err := database.Client(manual).
+		Exec("UPDATE tenant_records SET name = ? WHERE tenant_id = ?", "updated", manualTenantID).Error; err != nil {
+		t.Fatal(err)
+	}
+
+	rows = nil
+	if err := database.Client(manual).Find(&rows).Error; err != nil {
+		t.Fatal(err)
+	}
+	if len(rows) != 1 || rows[0].Name != "updated" {
+		t.Fatalf("manual mode regular CRUD lost automatic isolation: %+v", rows)
+	}
+
+	rows = nil
+	if err := database.Client(tenantOne).Table("tenant_records").Find(&rows).Error; !errors.Is(err, gormkit.ErrManualTenantRequired) {
+		t.Fatalf("automatic tenant Table: %v", err)
+	}
+
+	rows = nil
+	disabled := gormkit.WithDisableTenant(tenantOne)
+	if _, ok := gormkit.GetTenantID(disabled); ok {
+		t.Fatal("disabled tenant retained a tenant ID")
+	}
+	if err := database.Client(disabled).Raw("SELECT * FROM tenant_records").Scan(&rows).Error; err != nil {
+		t.Fatal(err)
+	}
+	if len(rows) != 2 {
+		t.Fatalf("disabled tenant rows = %d, want 2", len(rows))
+	}
+
+	missing := gormkit.WithManualTenant(context.Background())
+	if err := database.Client(missing).Find(&rows).Error; !errors.Is(err, gormkit.ErrTenantRequired) {
+		t.Fatalf("manual mode without tenant: %v", err)
 	}
 }

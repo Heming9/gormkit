@@ -2,6 +2,20 @@
 
 All notable changes are documented in this file.
 
+## [0.5.0] - 2026-09-12
+
+### Added
+
+- Add context-propagated `WithManualTenant` and `WithDisableTenant` modes.
+- Reject raw SQL, explicit table names, and joins in automatic tenant mode.
+
+### Changed
+
+- `Unscoped()` now bypasses only soft-delete filtering and preserves tenant
+  isolation. Cross-tenant access must use `WithDisableTenant` explicitly.
+- `Wrap` now installs gormkit's required callbacks while continuing to leave
+  optional plugins unchanged.
+
 ## [0.4.0] - 2026-09-12
 
 ### Changed

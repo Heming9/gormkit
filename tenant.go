@@ -12,11 +12,26 @@ import (
 )
 
 var (
-	ErrTenantRequired     = errors.New("gormkit: tenant context is required")
-	ErrUnsafeTenantUpsert = errors.New("gormkit: updating conflicts is unsafe for tenant models")
+	ErrTenantRequired       = errors.New("gormkit: tenant context is required")
+	ErrManualTenantRequired = errors.New("gormkit: operation may bypass automatic tenant isolation; use WithManualTenant or WithDisableTenant")
+	ErrUnsafeTenantUpsert   = errors.New("gormkit: updating conflicts is unsafe for tenant models")
 )
 
 type tenantKey struct{}
+
+type tenantMode uint8
+
+const (
+	tenantModeUnset tenantMode = iota
+	tenantModeAutomatic
+	tenantModeManual
+	tenantModeDisabled
+)
+
+type tenantState struct {
+	id   TenantID
+	mode tenantMode
+}
 
 // TenantID is a numeric tenant identifier stored as int64.
 type TenantID int64
@@ -29,16 +44,49 @@ func WithTenantID(ctx context.Context, id TenantID) context.Context {
 	if ctx == nil {
 		ctx = context.Background()
 	}
-	return context.WithValue(ctx, tenantKey{}, id)
+	return context.WithValue(ctx, tenantKey{}, tenantState{id: id, mode: tenantModeAutomatic})
+}
+
+// WithManualTenant returns a child context that retains the current tenant but
+// permits APIs whose tenant isolation cannot be applied automatically, such as
+// raw SQL. The caller is responsible for applying the tenant condition in
+// those operations. It does not disable automatic clauses for regular model
+// operations.
+func WithManualTenant(ctx context.Context) context.Context {
+	if ctx == nil {
+		ctx = context.Background()
+	}
+	state := getTenantState(ctx)
+	if state.mode == tenantModeAutomatic || state.mode == tenantModeManual {
+		state.mode = tenantModeManual
+	}
+	return context.WithValue(ctx, tenantKey{}, state)
+}
+
+// WithDisableTenant returns a child context that explicitly disables tenant
+// isolation. It is intended for cross-tenant operations.
+func WithDisableTenant(ctx context.Context) context.Context {
+	if ctx == nil {
+		ctx = context.Background()
+	}
+	return context.WithValue(ctx, tenantKey{}, tenantState{mode: tenantModeDisabled})
 }
 
 // GetTenantID returns the tenant stored in ctx, if any.
 func GetTenantID(ctx context.Context) (TenantID, bool) {
-	if ctx == nil {
+	state := getTenantState(ctx)
+	if state.mode != tenantModeAutomatic && state.mode != tenantModeManual {
 		return 0, false
 	}
-	id, ok := ctx.Value(tenantKey{}).(TenantID)
-	return id, ok
+	return state.id, true
+}
+
+func getTenantState(ctx context.Context) tenantState {
+	if ctx == nil {
+		return tenantState{}
+	}
+	state, _ := ctx.Value(tenantKey{}).(tenantState)
+	return state
 }
 
 func (TenantID) QueryClauses(field *schema.Field) []clause.Interface {
@@ -66,7 +114,11 @@ func (tenantQueryClause) Build(clause.Builder)       {}
 func (tenantQueryClause) MergeClause(*clause.Clause) {}
 
 func (tenant tenantQueryClause) ModifyStatement(statement *gorm.Statement) {
-	if statement == nil || statement.Unscoped {
+	if statement == nil {
+		return
+	}
+	state := getTenantState(statement.Context)
+	if state.mode == tenantModeDisabled {
 		return
 	}
 	if _, applied := statement.Clauses["gormkit:tenant_applied"]; applied {
@@ -85,15 +137,14 @@ func (tenant tenantQueryClause) ModifyStatement(statement *gorm.Statement) {
 			}
 		}
 	}
-	id, ok := GetTenantID(statement.Context)
-	if !ok {
+	if state.mode != tenantModeAutomatic && state.mode != tenantModeManual {
 		statement.AddError(ErrTenantRequired)
 		return
 	}
 	statement.AddClause(clause.Where{Exprs: []clause.Expression{
 		clause.Eq{
 			Column: clause.Column{Table: clause.CurrentTable, Name: tenant.field.DBName},
-			Value:  id,
+			Value:  state.id,
 		},
 	}})
 	statement.Clauses["gormkit:tenant_applied"] = clause.Clause{}
@@ -108,7 +159,7 @@ func (tenantUpdateClause) Build(clause.Builder)       {}
 func (tenantUpdateClause) MergeClause(*clause.Clause) {}
 
 func (tenant tenantUpdateClause) ModifyStatement(statement *gorm.Statement) {
-	if statement == nil || statement.SQL.Len() != 0 || statement.Unscoped {
+	if statement == nil || statement.SQL.Len() != 0 {
 		return
 	}
 	tenantQueryClause(tenant).ModifyStatement(statement)
@@ -124,7 +175,7 @@ func (tenantDeleteClause) Build(clause.Builder)       {}
 func (tenantDeleteClause) MergeClause(*clause.Clause) {}
 
 func (tenant tenantDeleteClause) ModifyStatement(statement *gorm.Statement) {
-	if statement == nil || statement.SQL.Len() != 0 || statement.Unscoped {
+	if statement == nil || statement.SQL.Len() != 0 {
 		return
 	}
 	tenantQueryClause(tenant).ModifyStatement(statement)
@@ -139,11 +190,14 @@ func (tenantCreateClause) Build(clause.Builder)       {}
 func (tenantCreateClause) MergeClause(*clause.Clause) {}
 
 func (tenant tenantCreateClause) ModifyStatement(statement *gorm.Statement) {
-	if statement == nil || statement.SQL.Len() != 0 || statement.Unscoped {
+	if statement == nil || statement.SQL.Len() != 0 {
 		return
 	}
-	id, ok := GetTenantID(statement.Context)
-	if !ok {
+	state := getTenantState(statement.Context)
+	if state.mode == tenantModeDisabled {
+		return
+	}
+	if state.mode != tenantModeAutomatic && state.mode != tenantModeManual {
 		statement.AddError(ErrTenantRequired)
 		return
 	}
@@ -158,7 +212,7 @@ func (tenant tenantCreateClause) ModifyStatement(statement *gorm.Statement) {
 	// Select("Name").Create(...) used to leave tenant_id at its database zero
 	// value even though SetColumn updated the in-memory model.
 	includeTenantOnCreate(statement, tenant.field)
-	statement.SetColumn(tenant.field.DBName, id, true)
+	statement.SetColumn(tenant.field.DBName, state.id, true)
 }
 
 func tenantConflictUpdates(expression clause.Expression) bool {

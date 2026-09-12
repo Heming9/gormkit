@@ -43,6 +43,10 @@ func Open(dialector gorm.Dialector, config *gorm.Config, plugins ...gorm.Plugin)
 		closeGORM(db)
 		return nil, err
 	}
+	if err := registerTenantGuardCallbacks(db); err != nil {
+		closeGORM(db)
+		return nil, err
+	}
 	for _, plugin := range plugins {
 		if plugin == nil {
 			closeGORM(db)
@@ -56,11 +60,17 @@ func Open(dialector gorm.Dialector, config *gorm.Config, plugins ...gorm.Plugin)
 	return &Database{client: db}, nil
 }
 
-// Wrap creates a Database around an existing GORM handle.
-// It does not register callbacks or plugins on the supplied handle.
+// Wrap creates a Database around an existing GORM handle and registers the
+// callbacks required by gormkit. It does not register optional plugins.
 func Wrap(db *gorm.DB) (*Database, error) {
 	if db == nil {
 		return nil, ErrNilDatabase
+	}
+	if err := registerForceCallback(db); err != nil {
+		return nil, err
+	}
+	if err := registerTenantGuardCallbacks(db); err != nil {
+		return nil, err
 	}
 	return &Database{client: db}, nil
 }

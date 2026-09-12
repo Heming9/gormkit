@@ -129,9 +129,27 @@ rejected for tenant models because a conflict on a global unique key could
 otherwise update another tenant's row. Use the repository's explicit `Create`
 and `Update` operations instead.
 
-> `Unscoped()` deliberately bypasses tenant filtering as well as GORM soft-delete
-> filtering. Treat it as a privileged operation and do not expose it to
-> untrusted request paths.
+Potentially bypassing APIs such as raw SQL, explicit table names, and joins are
+rejected while automatic tenant mode is active. Use `WithManualTenant` when the
+operation supplies its own tenant condition:
+
+```go
+manualCtx := gormkit.WithManualTenant(ctx)
+tenantID, _ := gormkit.GetTenantID(manualCtx)
+err := database.Client(manualCtx).
+    Raw("SELECT * FROM projects WHERE tenant_id = ?", tenantID).
+    Scan(&projects).Error
+```
+
+Use `WithDisableTenant` only for an explicitly cross-tenant operation:
+
+```go
+allTenantsCtx := gormkit.WithDisableTenant(ctx)
+err := database.Client(allTenantsCtx).Find(&projects).Error
+```
+
+`Unscoped()` only bypasses GORM soft-delete filtering; tenant filtering remains
+active. Combine it with `WithDisableTenant` when both behaviors are intended.
 
 ## Timestamp plugin
 
