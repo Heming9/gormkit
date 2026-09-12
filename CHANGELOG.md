@@ -2,6 +2,12 @@
 
 All notable changes are documented in this file.
 
+## Unreleased
+
+### Changed
+
+- Rename the explicit-client repository constructor from `NewRepository` to `NewRepo`.
+
 ## [0.3.0] - 2026-09-12
 
 ### Added

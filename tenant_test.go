@@ -208,7 +208,7 @@ func TestTenantRepositoryUpdateRejectsAnotherTenantsPrimaryKey(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	repo := gormkit.NewRepository[*tenantRecord](database.Client(tenantTwo))
+	repo := gormkit.NewRepo[*tenantRecord](database.Client(tenantTwo))
 	err := repo.Update(&tenantRecord{ID: victim.ID, Name: "overwritten"})
 	if !errors.Is(err, gorm.ErrRecordNotFound) {
 		t.Fatalf("cross-tenant Update: %v", err)

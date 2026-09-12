@@ -15,13 +15,13 @@ func TestTransactionCommitAndRollback(t *testing.T) {
 	migrateTestUsers(t, database)
 
 	err := database.Transaction(context.Background(), func(ctx context.Context) error {
-		return gormkit.NewRepository[*testUser](database.Client(ctx)).Create(&testUser{Name: "committed"})
+		return gormkit.NewRepo[*testUser](database.Client(ctx)).Create(&testUser{Name: "committed"})
 	})
 	if err != nil {
 		t.Fatalf("commit: %v", err)
 	}
 	err = database.Transaction(context.Background(), func(ctx context.Context) error {
-		if err := gormkit.NewRepository[*testUser](database.Client(ctx)).Create(&testUser{Name: "rolled back"}); err != nil {
+		if err := gormkit.NewRepo[*testUser](database.Client(ctx)).Create(&testUser{Name: "rolled back"}); err != nil {
 			return err
 		}
 		return errRollback
@@ -30,7 +30,7 @@ func TestTransactionCommitAndRollback(t *testing.T) {
 		t.Fatalf("rollback error: %v", err)
 	}
 
-	repo := gormkit.NewRepository[*testUser](database.Client(context.Background()))
+	repo := gormkit.NewRepo[*testUser](database.Client(context.Background()))
 	users, err := repo.FindAll()
 	if err != nil {
 		t.Fatal(err)
@@ -78,7 +78,7 @@ func TestTransactionPropagation(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	repo := gormkit.NewRepository[*testUser](database.Client(context.Background()))
+	repo := gormkit.NewRepo[*testUser](database.Client(context.Background()))
 	users, err := repo.WithScope(func(db gormkit.Client) gormkit.Client {
 		return db.Order("name")
 	}).FindAll()

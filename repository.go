@@ -47,8 +47,8 @@ type repository[T any] struct {
 	unscoped bool
 }
 
-// NewRepository creates a repository from an explicit GORM database handle.
-func NewRepository[T any](db Client) Repository[T] {
+// NewRepo creates a repository from an explicit GORM database handle.
+func NewRepo[T any](db Client) Repository[T] {
 	if db == nil {
 		return &repository[T]{err: ErrNilDatabase}
 	}
@@ -64,7 +64,7 @@ func RepoOf[T any](ctx context.Context) Repository[T] {
 	if err != nil {
 		return &repository[T]{err: err}
 	}
-	return NewRepository[T](db)
+	return NewRepo[T](db)
 }
 
 func validateModelType[T any]() error {

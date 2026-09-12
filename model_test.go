@@ -29,7 +29,7 @@ func TestJSONDataPreservesValueOnMarshalError(t *testing.T) {
 
 func TestRepositoryRejectsNonPointerModel(t *testing.T) {
 	database := openTestDatabase(t)
-	repo := gormkit.NewRepository[testUser](database.Client(nil))
+	repo := gormkit.NewRepo[testUser](database.Client(nil))
 	if _, err := repo.DB(); !errors.Is(err, gormkit.ErrInvalidModel) {
 		t.Fatalf("expected ErrInvalidModel, got %v", err)
 	}

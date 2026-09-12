@@ -12,7 +12,7 @@ import (
 func TestRepositoryCRUDAndErrors(t *testing.T) {
 	database := openTestDatabase(t)
 	migrateTestUsers(t, database)
-	repo := gormkit.NewRepository[*testUser](database.Client(context.Background()))
+	repo := gormkit.NewRepo[*testUser](database.Client(context.Background()))
 
 	alice := &testUser{Name: "Alice", Email: "alice@example.test", Age: 30}
 	if err := repo.Create(alice); err != nil {
@@ -46,7 +46,7 @@ func TestRepositoryCRUDAndErrors(t *testing.T) {
 func TestRepositoryCreateIsInsertOnly(t *testing.T) {
 	database := openTestDatabase(t)
 	migrateTestUsers(t, database)
-	repo := gormkit.NewRepository[*testUser](database.Client(context.Background()))
+	repo := gormkit.NewRepo[*testUser](database.Client(context.Background()))
 
 	created := &testUser{Name: "created"}
 	if err := repo.Create(created); err != nil {
@@ -73,7 +73,7 @@ func TestRepositoryCreateIsInsertOnly(t *testing.T) {
 func TestRepositoryCreateAllUsesOneBatchAndPopulatesIDs(t *testing.T) {
 	database := openTestDatabase(t)
 	migrateTestUsers(t, database)
-	repo := gormkit.NewRepository[*testUser](database.Client(context.Background()))
+	repo := gormkit.NewRepo[*testUser](database.Client(context.Background()))
 
 	first := &testUser{Name: "first"}
 	second := &testUser{Name: "second"}
@@ -90,7 +90,7 @@ func TestRepositoryCreateAllUsesOneBatchAndPopulatesIDs(t *testing.T) {
 }
 
 func TestRepositoryCreateAllEmptyIsNoOp(t *testing.T) {
-	repo := gormkit.NewRepository[*testUser](nil)
+	repo := gormkit.NewRepo[*testUser](nil)
 	if err := repo.CreateAll(); err != nil {
 		t.Fatalf("empty CreateAll: %v", err)
 	}
@@ -99,7 +99,7 @@ func TestRepositoryCreateAllEmptyIsNoOp(t *testing.T) {
 func TestRepositoryUpdateIncludesZeroValues(t *testing.T) {
 	database := openTestDatabase(t)
 	migrateTestUsers(t, database)
-	repo := gormkit.NewRepository[*testUser](database.Client(context.Background()))
+	repo := gormkit.NewRepo[*testUser](database.Client(context.Background()))
 
 	user := &testUser{Name: "first", Email: "first@example.test", Age: 30, Admin: true}
 	if err := repo.Create(user); err != nil {
@@ -123,7 +123,7 @@ func TestRepositoryUpdateIncludesZeroValues(t *testing.T) {
 func TestRepositoryUpdateValidation(t *testing.T) {
 	database := openTestDatabase(t)
 	migrateTestUsers(t, database)
-	repo := gormkit.NewRepository[*testUser](database.Client(context.Background()))
+	repo := gormkit.NewRepo[*testUser](database.Client(context.Background()))
 
 	if err := repo.Update(nil); !errors.Is(err, gormkit.ErrNilEntity) {
 		t.Fatalf("Update(nil): %v", err)
@@ -139,7 +139,7 @@ func TestRepositoryUpdateValidation(t *testing.T) {
 func TestRepositoryUpdateAllIsAtomic(t *testing.T) {
 	database := openTestDatabase(t)
 	migrateTestUsers(t, database)
-	repo := gormkit.NewRepository[*testUser](database.Client(context.Background()))
+	repo := gormkit.NewRepo[*testUser](database.Client(context.Background()))
 
 	first := &testUser{Name: "first"}
 	second := &testUser{Name: "second"}
@@ -167,7 +167,7 @@ func TestRepositoryUpdateAllIsAtomic(t *testing.T) {
 }
 
 func TestRepositoryUpdateAllEmptyIsNoOp(t *testing.T) {
-	repo := gormkit.NewRepository[*testUser](nil)
+	repo := gormkit.NewRepo[*testUser](nil)
 	if err := repo.UpdateAll(); err != nil {
 		t.Fatalf("empty UpdateAll: %v", err)
 	}
@@ -176,7 +176,7 @@ func TestRepositoryUpdateAllEmptyIsNoOp(t *testing.T) {
 func TestRepositoryPagingAndScopeIsolation(t *testing.T) {
 	database := openTestDatabase(t)
 	migrateTestUsers(t, database)
-	repo := gormkit.NewRepository[*testUser](database.Client(context.Background()))
+	repo := gormkit.NewRepo[*testUser](database.Client(context.Background()))
 	if err := repo.CreateAll(
 		&testUser{Name: "Charlie", Age: 40},
 		&testUser{Name: "Alice", Age: 20},
@@ -207,7 +207,7 @@ func TestRepositoryPagingAndScopeIsolation(t *testing.T) {
 func TestForceUpdatesZeroValues(t *testing.T) {
 	database := openTestDatabase(t)
 	migrateTestUsers(t, database)
-	repo := gormkit.NewRepository[*testUser](database.Client(context.Background()))
+	repo := gormkit.NewRepo[*testUser](database.Client(context.Background()))
 	user := &testUser{Name: "Alice", Age: 30, Admin: true}
 	if err := repo.Create(user); err != nil {
 		t.Fatal(err)

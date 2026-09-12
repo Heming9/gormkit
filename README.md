@@ -80,7 +80,7 @@ Repositories accept pointer-to-struct models and return database errors. Record
 not found errors remain compatible with `errors.Is(err, gorm.ErrRecordNotFound)`.
 
 ```go
-repo := gormkit.NewRepository[*User](database.Client(ctx))
+repo := gormkit.NewRepo[*User](database.Client(ctx))
 
 user := &User{Name: "example"}
 if err := repo.Create(user); err != nil {
