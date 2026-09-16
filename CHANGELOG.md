@@ -2,12 +2,18 @@
 
 All notable changes are documented in this file.
 
-## Unreleased
+## [0.5.1] - 2026-09-16
 
 ### Changed
 
 - Tenant guard errors now identify the GORM operation, resolved table/model,
   and bypass reason while remaining compatible with `ErrManualTenantRequired`.
+
+### Fixed
+
+- Allow GORM-generated savepoint, rollback-to-savepoint, and release-savepoint
+  statements in automatic tenant mode so nested transactions retain their
+  commit and rollback semantics.
 
 ## [0.5.0] - 2026-09-12
 

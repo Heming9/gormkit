@@ -21,6 +21,9 @@ func registerTenantGuardCallbacks(db *gorm.DB) error {
 			}
 
 			statement := db.Statement
+			if isTenantControlStatement(statement) {
+				return
+			}
 			reasons := tenantGuardReasons(operation, statement)
 			if len(reasons) > 0 {
 				db.AddError(&TenantGuardError{
@@ -49,6 +52,39 @@ func registerTenantGuardCallbacks(db *gorm.DB) error {
 		return err
 	}
 	return db.Callback().Raw().Before("gorm:raw").Register("gormkit:tenant_guard", guard("raw"))
+}
+
+// isTenantControlStatement recognizes the exact transaction-control SQL that
+// GORM's supported dialectors emit for nested transactions. These statements
+// do not access tenant data and must not require manual tenant mode.
+func isTenantControlStatement(statement *gorm.Statement) bool {
+	if statement == nil || len(statement.Vars) != 0 || statement.TableExpr != nil || len(statement.Joins) != 0 {
+		return false
+	}
+
+	sql := statement.SQL.String()
+	for _, prefix := range []string{
+		"SAVEPOINT ",
+		"ROLLBACK TO SAVEPOINT ",
+		"RELEASE SAVEPOINT ",
+	} {
+		if strings.HasPrefix(sql, prefix) {
+			return isGORMGeneratedSavepointName(strings.TrimPrefix(sql, prefix))
+		}
+	}
+	return false
+}
+
+func isGORMGeneratedSavepointName(name string) bool {
+	if len(name) <= 2 || !strings.HasPrefix(name, "sp") {
+		return false
+	}
+	for _, char := range name[2:] {
+		if char < '0' || char > '9' {
+			return false
+		}
+	}
+	return true
 }
 
 func tenantGuardReasons(operation string, statement *gorm.Statement) []string {

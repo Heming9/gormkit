@@ -421,3 +421,49 @@ func TestTenantManualAndDisabledModes(t *testing.T) {
 		t.Fatalf("manual mode without tenant: %v", err)
 	}
 }
+
+func TestTenantNestedTransactions(t *testing.T) {
+	database := openTestDatabase(t)
+	base := database.Client(gormkit.WithDisableTenant(context.Background()))
+	if err := base.AutoMigrate(&tenantRecord{}); err != nil {
+		t.Fatal(err)
+	}
+
+	ctx := gormkit.WithTenantID(context.Background(), 41)
+	err := database.Client(ctx).Transaction(func(outer *gorm.DB) error {
+		if err := outer.Create(&tenantRecord{Name: "outer"}).Error; err != nil {
+			return err
+		}
+		if err := outer.Transaction(func(nested *gorm.DB) error {
+			return nested.Create(&tenantRecord{Name: "nested committed"}).Error
+		}); err != nil {
+			return err
+		}
+		nestedErr := outer.Transaction(func(nested *gorm.DB) error {
+			if err := nested.Create(&tenantRecord{Name: "nested rolled back"}).Error; err != nil {
+				return err
+			}
+			return errRollback
+		})
+		if !errors.Is(nestedErr, errRollback) {
+			return nestedErr
+		}
+		return nil
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	var rows []tenantRecord
+	if err := database.Client(ctx).Order("name").Find(&rows).Error; err != nil {
+		t.Fatal(err)
+	}
+	if len(rows) != 2 || rows[0].Name != "nested committed" || rows[1].Name != "outer" {
+		t.Fatalf("nested transaction rows: %+v", rows)
+	}
+	for _, row := range rows {
+		if row.TenantID != 41 {
+			t.Fatalf("nested transaction tenant = %d for row %+v, want 41", row.TenantID, row)
+		}
+	}
+}

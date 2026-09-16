@@ -20,6 +20,14 @@ type user struct {
 
 func (user) TableName() string { return "gormkit_integration_user" }
 
+type tenantUser struct {
+	ID       uint             `gorm:"primaryKey"`
+	TenantID gormkit.TenantID `gorm:"column:tenant_id;index"`
+	Name     string
+}
+
+func (tenantUser) TableName() string { return "gormkit_integration_tenant_user" }
+
 func openMySQL(t *testing.T) *gormkit.Database {
 	t.Helper()
 	address := os.Getenv("MYSQL_ADDRESS")
@@ -37,12 +45,57 @@ func openMySQL(t *testing.T) *gormkit.Database {
 		t.Fatalf("open MySQL: %v", err)
 	}
 	t.Cleanup(func() {
-		_ = database.Client(context.Background()).Migrator().DropTable(&user{})
+		_ = database.Client(gormkit.WithDisableTenant(context.Background())).Migrator().DropTable(&user{}, &tenantUser{})
 		if err := database.Close(); err != nil {
 			t.Errorf("close MySQL: %v", err)
 		}
 	})
 	return database
+}
+
+func TestMySQLTenantNestedTransaction(t *testing.T) {
+	database := openMySQL(t)
+	base := database.Client(gormkit.WithDisableTenant(context.Background()))
+	if err := base.Migrator().DropTable(&tenantUser{}); err != nil {
+		t.Fatal(err)
+	}
+	if err := base.AutoMigrate(&tenantUser{}); err != nil {
+		t.Fatal(err)
+	}
+
+	ctx := gormkit.WithTenantID(context.Background(), 7)
+	errRollback := errors.New("nested rollback")
+	err := database.Client(ctx).Transaction(func(outer *gorm.DB) error {
+		if err := outer.Create(&tenantUser{Name: "outer"}).Error; err != nil {
+			return err
+		}
+		if err := outer.Transaction(func(nested *gorm.DB) error {
+			return nested.Create(&tenantUser{Name: "nested committed"}).Error
+		}); err != nil {
+			return err
+		}
+		nestedErr := outer.Transaction(func(nested *gorm.DB) error {
+			if err := nested.Create(&tenantUser{Name: "nested rolled back"}).Error; err != nil {
+				return err
+			}
+			return errRollback
+		})
+		if !errors.Is(nestedErr, errRollback) {
+			return nestedErr
+		}
+		return nil
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	var rows []tenantUser
+	if err := database.Client(ctx).Order("name").Find(&rows).Error; err != nil {
+		t.Fatal(err)
+	}
+	if len(rows) != 2 || rows[0].Name != "nested committed" || rows[1].Name != "outer" {
+		t.Fatalf("unexpected MySQL tenant rows: %+v", rows)
+	}
 }
 
 func TestMySQLRepositoryAndTransaction(t *testing.T) {
