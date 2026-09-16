@@ -3,6 +3,7 @@ package gormkit
 import (
 	"context"
 	"errors"
+	"fmt"
 	"strconv"
 	"strings"
 
@@ -10,6 +11,44 @@ import (
 	"gorm.io/gorm/clause"
 	"gorm.io/gorm/schema"
 )
+
+// TenantGuardError identifies an operation that requires explicit tenant
+// handling because GORM cannot safely apply the automatic tenant predicate.
+//
+// It unwraps to ErrManualTenantRequired, so existing errors.Is checks remain
+// compatible. Table and Model are omitted when GORM has not resolved them.
+type TenantGuardError struct {
+	Operation string
+	Table     string
+	Model     string
+	Reasons   []string
+}
+
+func (err *TenantGuardError) Error() string {
+	if err == nil {
+		return ""
+	}
+
+	var target string
+	switch {
+	case err.Table != "" && err.Model != "":
+		target = fmt.Sprintf(" on table %q (model %q)", err.Table, err.Model)
+	case err.Table != "":
+		target = fmt.Sprintf(" on table %q", err.Table)
+	case err.Model != "":
+		target = fmt.Sprintf(" on model %q", err.Model)
+	}
+
+	reasons := "an unsafe statement"
+	if len(err.Reasons) > 0 {
+		reasons = strings.Join(err.Reasons, ", ")
+	}
+	return fmt.Sprintf("gormkit: %s%s may bypass automatic tenant isolation (%s); use WithManualTenant or WithDisableTenant",
+		err.Operation, target, reasons)
+}
+
+// Unwrap preserves compatibility with errors.Is(err, ErrManualTenantRequired).
+func (*TenantGuardError) Unwrap() error { return ErrManualTenantRequired }
 
 var (
 	ErrTenantRequired       = errors.New("gormkit: tenant context is required")

@@ -2,6 +2,13 @@
 
 All notable changes are documented in this file.
 
+## Unreleased
+
+### Changed
+
+- Tenant guard errors now identify the GORM operation, resolved table/model,
+  and bypass reason while remaining compatible with `ErrManualTenantRequired`.
+
 ## [0.5.0] - 2026-09-12
 
 ### Added

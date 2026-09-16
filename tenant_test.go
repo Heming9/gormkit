@@ -338,6 +338,13 @@ func TestTenantManualAndDisabledModes(t *testing.T) {
 	if !errors.Is(err, gormkit.ErrManualTenantRequired) {
 		t.Fatalf("automatic tenant Raw: %v", err)
 	}
+	var guardErr *gormkit.TenantGuardError
+	if !errors.As(err, &guardErr) {
+		t.Fatalf("automatic tenant Raw did not return TenantGuardError: %T", err)
+	}
+	if guardErr.Operation != "row" || len(guardErr.Reasons) != 1 || guardErr.Reasons[0] != "prebuilt SQL" {
+		t.Fatalf("automatic tenant Raw context = %+v", guardErr)
+	}
 
 	manual := gormkit.WithManualTenant(tenantOne)
 	manualTenantID, ok := gormkit.GetTenantID(manual)
@@ -371,8 +378,30 @@ func TestTenantManualAndDisabledModes(t *testing.T) {
 	}
 
 	rows = nil
-	if err := database.Client(tenantOne).Table("tenant_records").Find(&rows).Error; !errors.Is(err, gormkit.ErrManualTenantRequired) {
+	err = database.Client(tenantOne).Table("tenant_records").Find(&rows).Error
+	if !errors.Is(err, gormkit.ErrManualTenantRequired) {
 		t.Fatalf("automatic tenant Table: %v", err)
+	}
+	if !errors.As(err, &guardErr) {
+		t.Fatalf("automatic tenant Table did not return TenantGuardError: %T", err)
+	}
+	if guardErr.Operation != "query" || guardErr.Table != "tenant_records" || len(guardErr.Reasons) != 1 || guardErr.Reasons[0] != "Table" {
+		t.Fatalf("automatic tenant Table context = %+v", guardErr)
+	}
+
+	rows = nil
+	err = database.Client(tenantOne).
+		Model(&tenantRecord{}).
+		Joins("JOIN tenant_records AS related ON related.id = tenant_records.id").
+		Find(&rows).Error
+	if !errors.Is(err, gormkit.ErrManualTenantRequired) {
+		t.Fatalf("automatic tenant Joins: %v", err)
+	}
+	if !errors.As(err, &guardErr) {
+		t.Fatalf("automatic tenant Joins did not return TenantGuardError: %T", err)
+	}
+	if guardErr.Operation != "query" || guardErr.Table != "tenant_records" || guardErr.Model != "tenantRecord" || len(guardErr.Reasons) != 1 || guardErr.Reasons[0] != "Joins" {
+		t.Fatalf("automatic tenant Joins context = %+v", guardErr)
 	}
 
 	rows = nil
