@@ -73,6 +73,25 @@ err := database.Transaction(ctx, func(txctx context.Context) error {
 `TPNested` asks GORM to create a nested transaction/savepoint when a transaction
 already exists.
 
+Driver transaction settings can be supplied with `WithTxOptions`:
+
+```go
+err := database.Transaction(ctx, fn,
+    gormkit.WithPropagation(gormkit.TPRequired),
+    gormkit.WithTxOptions(&sql.TxOptions{
+        Isolation: sql.LevelReadCommitted,
+        ReadOnly:  true,
+    }),
+)
+```
+
+Passing `TPRequired` or `TPNested` directly remains supported. When an existing
+transaction is reused or nested, explicit transaction settings must match its
+settings because savepoints cannot change isolation or read-only state.
+Existing calls therefore need no changes. Code that expands a prebuilt
+`[]TransactionPropagation` should convert it to `[]TransactionOption` (or pass
+each value through `WithPropagation`) before expanding the slice.
+
 ## Generic repository
 
 Repositories accept pointer-to-struct models and return database errors. Record

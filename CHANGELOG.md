@@ -2,6 +2,14 @@
 
 All notable changes are documented in this file.
 
+## [0.6.0] - 2026-09-16
+
+### Added
+
+- Add extensible transaction options with `WithPropagation` and
+  `WithTxOptions`, including validation when reusing or nesting transactions
+  and MySQL `READ COMMITTED` integration coverage.
+
 ## [0.5.1] - 2026-09-16
 
 ### Changed

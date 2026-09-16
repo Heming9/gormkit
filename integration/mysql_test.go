@@ -4,6 +4,7 @@ package integration_test
 
 import (
 	"context"
+	"database/sql"
 	"errors"
 	"os"
 	"testing"
@@ -140,5 +141,40 @@ func TestMySQLRepositoryAndTransaction(t *testing.T) {
 	}
 	if _, err := gormkit.Wrap((*gorm.DB)(nil)); !errors.Is(err, gormkit.ErrNilDatabase) {
 		t.Fatalf("Wrap(nil): %v", err)
+	}
+}
+
+func TestMySQLTransactionIsolation(t *testing.T) {
+	database := openMySQL(t)
+	err := database.Transaction(context.Background(), func(ctx context.Context) error {
+		var isolation string
+		if err := database.Client(ctx).Raw(`
+			SELECT transaction.ISOLATION_LEVEL
+			FROM performance_schema.events_transactions_current AS transaction
+			JOIN performance_schema.threads AS thread USING (THREAD_ID)
+			WHERE thread.PROCESSLIST_ID = CONNECTION_ID()
+			  AND transaction.STATE = 'ACTIVE'
+		`).Scan(&isolation).Error; err != nil {
+			return err
+		}
+		if isolation != "READ COMMITTED" {
+			t.Fatalf("transaction isolation = %q, want READ COMMITTED", isolation)
+		}
+		return nil
+	}, gormkit.WithTxOptions(&sql.TxOptions{Isolation: sql.LevelReadCommitted}))
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	called := false
+	err = database.Transaction(context.Background(), func(context.Context) error {
+		called = true
+		return nil
+	}, gormkit.WithTxOptions(&sql.TxOptions{Isolation: sql.LevelSnapshot}))
+	if err == nil {
+		t.Fatal("unsupported isolation level succeeded")
+	}
+	if called {
+		t.Fatal("callback ran with an unsupported isolation level")
 	}
 }

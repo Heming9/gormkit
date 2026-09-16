@@ -2,6 +2,7 @@ package gormkit_test
 
 import (
 	"context"
+	"database/sql"
 	"errors"
 	"testing"
 
@@ -99,8 +100,70 @@ func TestTransactionValidation(t *testing.T) {
 	if err := database.Transaction(context.Background(), noop, gormkit.TPRequired, gormkit.TPNested); !errors.Is(err, gormkit.ErrInvalidTransactionPropagation) {
 		t.Fatalf("multiple propagation options: %v", err)
 	}
+	if err := database.Transaction(context.Background(), noop, gormkit.WithPropagation(gormkit.TransactionPropagation(99))); !errors.Is(err, gormkit.ErrInvalidTransactionPropagation) {
+		t.Fatalf("invalid propagation option: %v", err)
+	}
+	if err := database.Transaction(context.Background(), noop,
+		gormkit.WithTxOptions(nil),
+		gormkit.WithTxOptions(&sql.TxOptions{}),
+	); !errors.Is(err, gormkit.ErrInvalidTransactionOption) {
+		t.Fatalf("multiple transaction options: %v", err)
+	}
+	if err := database.Transaction(context.Background(), noop, nil); !errors.Is(err, gormkit.ErrInvalidTransactionOption) {
+		t.Fatalf("nil transaction option: %v", err)
+	}
 	if err := database.Transaction(context.Background(), nil); err == nil {
 		t.Fatal("expected nil callback error")
+	}
+}
+
+func TestTransactionOptionsPropagation(t *testing.T) {
+	database := openTestDatabase(t)
+	wanted := &sql.TxOptions{Isolation: sql.LevelSerializable}
+	option := gormkit.WithTxOptions(wanted)
+	// WithTxOptions snapshots its input instead of retaining a caller-owned
+	// pointer that can change before the transaction starts.
+	wanted.Isolation = sql.LevelReadUncommitted
+
+	err := database.Transaction(context.Background(), func(outer context.Context) error {
+		if err := database.Transaction(outer, func(context.Context) error { return nil },
+			gormkit.WithTxOptions(&sql.TxOptions{Isolation: sql.LevelSerializable}),
+		); err != nil {
+			return err
+		}
+		if err := database.Transaction(outer, func(context.Context) error { return nil },
+			gormkit.WithPropagation(gormkit.TPNested),
+			gormkit.WithTxOptions(&sql.TxOptions{Isolation: sql.LevelSerializable}),
+		); err != nil {
+			return err
+		}
+
+		called := false
+		err := database.Transaction(outer, func(context.Context) error {
+			called = true
+			return nil
+		}, gormkit.WithTxOptions(&sql.TxOptions{Isolation: sql.LevelReadCommitted}))
+		if !errors.Is(err, gormkit.ErrIncompatibleTxOptions) {
+			t.Fatalf("required incompatible options: %v", err)
+		}
+		if called {
+			t.Fatal("required callback ran with incompatible options")
+		}
+
+		err = database.Transaction(outer, func(context.Context) error {
+			called = true
+			return nil
+		}, gormkit.TPNested, gormkit.WithTxOptions(&sql.TxOptions{ReadOnly: true}))
+		if !errors.Is(err, gormkit.ErrIncompatibleTxOptions) {
+			t.Fatalf("nested incompatible options: %v", err)
+		}
+		if called {
+			t.Fatal("nested callback ran with incompatible options")
+		}
+		return nil
+	}, option)
+	if err != nil {
+		t.Fatal(err)
 	}
 }
 
